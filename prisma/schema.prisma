@@ -1,0 +1,219 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// если будешь модели менять или добавлять новые то после своих разработок
+// используй команду yarn prisma generate она генерирует новый prisma client
+// и yarn prisma db push. она синхрониризует измененные модели с базой данных
+
+model Bot {
+  id           Int        @id @unique @default(autoincrement())
+  token        String     @unique
+  customer_id  Int
+  username     String?    @unique @db.VarChar(32)
+  first_name   String?    @db.VarChar(64)
+  raffles      Raffle[]
+  mailing      Mailing[]
+  raffles_root raffles[]
+  tg_users     tg_users[]
+  users        User[]
+  customers    customers  @relation(fields: [customer_id], references: [id])
+
+  @@unique([customer_id, id])
+  @@map("bots_node")
+}
+
+model User {
+  id                   Int           @id @default(autoincrement())
+  // id который дает telegram каждому пользователю
+  userTgId             String        @unique
+  uniqueName           String?
+  ageRange             String?
+  country              String?
+  gender               String?
+  subscriptionAttempts Int           @default(0)
+  botToken             String
+  initTimestamp        DateTime      @default(now()) @db.Timestamptz
+  mailing              Mailing[]
+  tickets              Tickets[]
+  bot                  Bot?          @relation(fields: [botId], references: [id])
+  userAntispam         UserAntispam?
+  botId                Int?
+
+  @@map("users_node")
+}
+
+model UserAntispam {
+  userId          Int    @id @unique
+  userTgId        String @unique
+  messagesAmount  Int    @default(1)
+  lastMessageDate String
+  user            User   @relation(fields: [userId], references: [id])
+
+  @@map("users-antispam")
+}
+
+model Tickets {
+  id                          Int       @id @default(autoincrement())
+  userId                      Int
+  raffleId                    Int
+  ticketsAmount               Int
+  // приглашенные рефералы за все время. также используется для начисления дополнительных билетов за конкретный розыгрыш
+  invitedReferralsAmount      Int       @default(0)
+  todayBonusSeries            Int       @default(5)
+  bonusReceivedStatus         Boolean   @default(false)
+  // по этой дате проверяется когда последний раз забирал юзер бонус
+  lastDateBonusSend           DateTime? @db.Date
+  // todayReferralsSeries === сколько нужно пригласить рефералов на сегодня. стакается максимум до 5
+  // еще используется для начисления бонусных билетов за рефералов приглашенных в рамках ежедневного бонуса
+  todayReferralsSeries        Int       @default(0)
+  // todayInvitedReferralsAmount === сколько приглашено рефералов за сегодня
+  // показатель должен сбрасываться каждый день в 00:00 полночь
+  todayInvitedReferralsAmount Int       @default(0)
+  user                        User      @relation(fields: [userId], references: [id])
+  raffle                      Raffle    @relation(fields: [raffleId], references: [id])
+
+  @@map("tickets_node")
+}
+
+model Mailing {
+  id       Int     @id @default(autoincrement())
+  botId    Int
+  userId   Int
+  raffle   Raffle? @relation(fields: [raffleId], references: [id])
+  bot      Bot     @relation(fields: [botId], references: [id])
+  user     User    @relation(fields: [userId], references: [id])
+  raffleId Int?
+
+  @@map("mailing_node")
+}
+
+model Raffle {
+  id              Int            @id @unique
+  botId           Int
+  startDate       DateTime       @db.Timestamptz
+  endDate         DateTime       @db.Timestamptz
+  active          Boolean
+  title           String
+  description     String
+  pictureLink     String
+  tgChannelsLinks String[]
+  // 0 элемент === приз за первое место, 1 элемент === приз за 2 место и тд. по возрастанию идут призовые места
+  prizes          String[]
+  createdAt       DateTime       @default(now()) @db.Timestamptz
+  bot             Bot            @relation(fields: [botId], references: [id])
+  tickets         Tickets[]
+  // здесь поле должно быть опциональным. в отношениях один к одному одна из сторон будет обладать опциональным полем
+  RaffleWinners   RaffleWinners?
+  Mailing         Mailing[]
+
+  @@map("raffles_node")
+}
+
+model SequelizeMeta {
+  name String @id @db.VarChar(255)
+}
+
+model admins {
+  id            Int      @id @default(autoincrement())
+  username      String?  @db.VarChar(255)
+  email_address String?  @db.VarChar(255)
+  password_hash String?  @db.VarChar(255)
+  createdAt     DateTime @db.Timestamptz(6)
+  updatedAt     DateTime @db.Timestamptz(6)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model bots {
+  customer_id Int
+  id          Int        @default(autoincrement())
+  token       String     @unique @db.VarChar(64)
+  username    String?    @unique @db.VarChar(32)
+  first_name  String?    @db.VarChar(64)
+  customers   customers  @relation(fields: [customer_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "bots_customers_fkey")
+  raffles     raffles[]
+  tg_users    tg_users[]
+
+  @@id([customer_id, id])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model customers {
+  id                 Int               @id @default(autoincrement())
+  email_address      String            @unique @db.VarChar(256)
+  password_hash      String            @db.VarChar
+  verified           Boolean           @default(false)
+  rate_plan_id       Int?              @db.SmallInt
+  draws_count        Int               @default(0)
+  creation_timestamp DateTime?         @db.Timestamp(6)
+  usr_phone_number   String?           @db.VarChar(32)
+  usr_tg             String?           @db.VarChar(32)
+  manager_id         Int?
+  email_confirmation Boolean           @default(false)
+  managers           managers?         @relation(fields: [manager_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  resets_password    resets_password[] @ignore
+  sales_managers     sales_managers[]
+  bots               bots[]
+  bot                Bot[]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model tg_users {
+  customer_id       Int
+  bot_id            Int
+  id                BigInt
+  init_timestamp    DateTime            @default(now()) @db.Timestamp(6)
+  ref_tg_user_id    BigInt?
+  is_male           Boolean?
+  age_range         age_range?
+  country           country?
+  button            Boolean             @default(false)
+  button_2          Boolean             @default(false)
+  tg_username       String?             @db.VarChar(255)
+  raffle_progresses raffle_progresses[]
+  bot               Bot?                @relation(fields: [customer_id, bot_id], references: [customer_id, id], onDelete: Cascade, onUpdate: NoAction, map: "tg_users_bots_fkey")
+  bots              bots?               @relation(fields: [botsCustomer_id, botsId], references: [customer_id, id])
+  botsCustomer_id   Int?
+  botsId            Int?
+
+  @@id([customer_id, bot_id, id])
+}
+
+enum age_range {
+  UP_TO_18      @map("до 18")
+  FROM_18_TO_24 @map("18-24")
+  FROM_25_TO_34 @map("25-34")
+  FROM_35_TO_44 @map("35-44")
+  OVER_45       @map("45+")
+}
+
+/// This enum is commented in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// enum country {
+/// Беларусь @map("Беларусь")
+/// Казахстан @map("Казахстан")
+/// Россия @map("Россия")
+/// Узбекистан @map("Узбекистан")
+/// Украина @map("Украина")
+///}
+enum country {
+  BELARUS    @map("Беларусь")
+  KAZAKHSTAN @map("Казахстан")
+  RUSSIA     @map("Россия")
+  UZBEKISTAN @map("Узбекистан")
+  UKRAINE    @map("Украина")
+}
+
+enum enum_dockerized_bots_status {
+  running
+  stopped
+}
+
+enum status_enum {
+  running
+  stopped
+}
